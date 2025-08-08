@@ -28,9 +28,9 @@ let logCount = 0;
 let startTime = new Date();
 // Removed cooldown - will send alert every time VPS is detected as offline
 
-// Logger (more silent to reduce console clutter)
+// Logger (completely silent to reduce console clutter)
 const logger = P({ 
-    level: 'fatal' // Only show fatal errors, hide session warnings
+    level: 'silent' // Completely silent, no logs at all
 });
 
 // Function to clear console and show summary
@@ -81,11 +81,15 @@ async function connectToWhatsApp() {
         browser: ['VPS Monitor Bot', 'Desktop', '1.0.0'],
         syncFullHistory: false,
         generateHighQualityLinkPreview: false,
-        markOnlineOnConnect: true,
+        markOnlineOnConnect: false, // Don't mark as online to reduce session activity
         fireInitQueries: false,
         emitOwnEvents: false,
         shouldSyncHistoryMessage: () => false,
         shouldIgnoreJid: () => false,
+        retryRequestDelayMs: 60000, // Reduce retry frequency
+        maxMsgRetryCount: 1, // Reduce retry attempts
+        msgRetryCounterCache: undefined, // Disable retry counter cache
+        connectTimeoutMs: 20000, // Reduce connection timeout
         getMessage: async (key) => {
             return { conversation: '' };
         }
