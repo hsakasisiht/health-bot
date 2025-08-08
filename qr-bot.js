@@ -11,11 +11,14 @@ const path = require('path');
 
 // Configuration
 const CONFIG = {
-    VPS_HOST: '103.180.213.240',  // Your VPS IP
+    VPS_HOST: '8.8.8.8',  // External host to test internet connectivity (Google DNS)
     TARGET_WHATSAPP: '919675893215@s.whatsapp.net',  // Your main WhatsApp number (who receives alerts)
     PING_INTERVAL: 5000, // 5 seconds
     OFFLINE_THRESHOLD: 3, // Consider offline after 3 failed pings
     LOG_CLEAR_INTERVAL: 3600000, // 1 hour in milliseconds
+    // VPS-specific settings
+    EXTERNAL_CHECK_HOST: '1.1.1.1', // Cloudflare DNS as backup
+    SELF_CHECK_ENABLED: false, // Don't ping self when running on VPS
 };
 
 let sock;
@@ -25,8 +28,18 @@ let logCount = 0;
 let startTime = new Date();
 // Removed cooldown - will send alert every time VPS is detected as offline
 
-// Logger (silent to avoid clutter)
-const logger = P({ level: 'silent' });
+// Logger (more silent to reduce console clutter)
+const logger = P({ 
+    level: 'fatal', // Only show fatal errors, hide session warnings
+    transport: {
+        target: 'pino-pretty',
+        options: {
+            colorize: false,
+            ignore: 'pid,hostname',
+            translateTime: 'SYS:standard'
+        }
+    }
+});
 
 // Function to clear console and show summary
 function clearConsoleWithSummary() {
@@ -74,6 +87,16 @@ async function connectToWhatsApp() {
         logger,
         auth: state,
         browser: ['VPS Monitor Bot', 'Desktop', '1.0.0'],
+        syncFullHistory: false,
+        generateHighQualityLinkPreview: false,
+        markOnlineOnConnect: true,
+        fireInitQueries: false,
+        emitOwnEvents: false,
+        shouldSyncHistoryMessage: () => false,
+        shouldIgnoreJid: () => false,
+        getMessage: async (key) => {
+            return { conversation: '' };
+        }
     });
 
     sock.ev.on('connection.update', async (update) => {
@@ -104,11 +127,13 @@ async function connectToWhatsApp() {
             
             // Send test message to confirm connection
             try {
+                const hostInfo = process.platform === 'linux' ? 'Ubuntu VPS' : 'Local Machine';
                 const testMessage = `🤖 VPS Monitor Bot Connected!\n\n` +
-                                  `✅ Bot is now monitoring your VPS\n` +
+                                  `✅ Bot is now monitoring connectivity\n` +
                                   `🌐 Host: ${CONFIG.VPS_HOST}\n` +
+                                  `💻 Running on: ${hostInfo}\n` +
                                   `⏰ Started: ${new Date().toLocaleString()}\n` +
-                                  `🔔 You'll receive alerts if VPS goes offline`;
+                                  `🔔 You'll receive alerts if connectivity issues occur`;
                 
                 await sock.sendMessage(CONFIG.TARGET_WHATSAPP, { text: testMessage });
                 console.log('✅ Test message sent to your WhatsApp!');
@@ -123,18 +148,42 @@ async function connectToWhatsApp() {
     });
 
     sock.ev.on('creds.update', saveCreds);
+    
+    // Reduce session-related logging
+    sock.ev.on('messages.upsert', () => {
+        // Silently handle message updates to reduce console spam
+    });
 }
 
 async function pingVps() {
     try {
-        const result = await ping.promise.probe(CONFIG.VPS_HOST, {
+        // For Ubuntu/Linux, use different ping syntax
+        const isLinux = process.platform === 'linux';
+        const pingOptions = {
             timeout: 5,
-            extra: ['-n', '1'] // Windows ping syntax
-        });
+            extra: isLinux ? ['-c', '1'] : ['-n', '1'] // Linux vs Windows ping syntax
+        };
         
+        const result = await ping.promise.probe(CONFIG.VPS_HOST, pingOptions);
         return result.alive;
     } catch (error) {
         console.error('❌ Ping error:', error.message);
+        
+        // Try backup host if primary fails
+        try {
+            const backupResult = await ping.promise.probe(CONFIG.EXTERNAL_CHECK_HOST, {
+                timeout: 3,
+                extra: process.platform === 'linux' ? ['-c', '1'] : ['-n', '1']
+            });
+            
+            if (backupResult.alive) {
+                console.log('⚠️ Primary host unreachable but internet is working (backup ping successful)');
+                return false; // Still consider it as "offline" for the primary host
+            }
+        } catch (backupError) {
+            console.error('❌ Both primary and backup ping failed:', backupError.message);
+        }
+        
         return false;
     }
 }
@@ -163,51 +212,54 @@ async function checkVpsStatus() {
     
     if (isOnline) {
         if (isVpsOffline) {
-            // VPS came back online
+            // Connection came back online
             consecutiveFailures = 0;
             isVpsOffline = false;
-            const message = `🟢 VPS BACK ONLINE!\n\n` +
-                          `🌐 Host: ${CONFIG.VPS_HOST}\n` +
+            const message = `🟢 CONNECTIVITY RESTORED!\n\n` +
+                          `🌐 Target: ${CONFIG.VPS_HOST}\n` +
                           `⏰ Recovery Time: ${timestamp}\n` +
-                          `✅ Server is responding normally`;
+                          `✅ Network is responding normally`;
             
             await sendWhatsAppAlert(message);
-            console.log(`🟢 ${timestamp} - VPS is back online!`);
+            console.log(`🟢 ${timestamp} - Connectivity restored!`);
         } else {
             // Only show online status every 20 checks (every 100 seconds) to reduce logs
             if (logCount % 20 === 0) {
-                console.log(`🟢 ${timestamp} - VPS is online (${logCount} checks)`);
+                console.log(`🟢 ${timestamp} - Network connectivity OK (${logCount} checks)`);
             }
         }
     } else {
         consecutiveFailures++;
-        console.log(`🔴 ${timestamp} - VPS ping failed (${consecutiveFailures}/${CONFIG.OFFLINE_THRESHOLD})`);
+        console.log(`🔴 ${timestamp} - Network ping failed (${consecutiveFailures}/${CONFIG.OFFLINE_THRESHOLD})`);
         
         if (consecutiveFailures >= CONFIG.OFFLINE_THRESHOLD) {
-            // VPS is considered offline - send alert every time
-            const message = `🚨 VPS OFFLINE ALERT!\n\n` +
-                          `🌐 Host: ${CONFIG.VPS_HOST}\n` +
+            // Connection is considered offline - send alert every time
+            const message = `🚨 NETWORK CONNECTIVITY ALERT!\n\n` +
+                          `🌐 Target: ${CONFIG.VPS_HOST}\n` +
                           `⏰ Check Time: ${timestamp}\n` +
                           `❌ Failed Pings: ${consecutiveFailures}\n` +
-                          `⚠️ Please check your VPS immediately!`;
+                          `⚠️ Network connectivity issue detected!`;
             
             await sendWhatsAppAlert(message);
             
             if (!isVpsOffline) {
                 isVpsOffline = true;
-                console.log(`🚨 ${timestamp} - VPS OFFLINE! First alert sent.`);
+                console.log(`🚨 ${timestamp} - CONNECTIVITY LOST! First alert sent.`);
             } else {
-                console.log(`🚨 ${timestamp} - VPS STILL OFFLINE! Alert sent again.`);
+                console.log(`🚨 ${timestamp} - STILL OFFLINE! Alert sent again.`);
             }
         }
     }
 }
 
 function startVpsMonitoring() {
+    const platform = process.platform === 'linux' ? 'Ubuntu VPS' : 'Windows';
+    
     console.log('\n' + '='.repeat(50));
-    console.log('🔍 VPS MONITORING STARTED');
+    console.log('🔍 NETWORK MONITORING STARTED');
     console.log('='.repeat(50));
-    console.log(`🌐 VPS Host: ${CONFIG.VPS_HOST}`);
+    console.log(`🌐 Target Host: ${CONFIG.VPS_HOST} (${CONFIG.VPS_HOST === '8.8.8.8' ? 'Google DNS' : 'Custom'})`);
+    console.log(`💻 Platform: ${platform}`);
     console.log(`⏱️  Check Interval: ${CONFIG.PING_INTERVAL / 1000} seconds`);
     console.log(`📱 Alert Destination: ${CONFIG.TARGET_WHATSAPP}`);
     console.log(`🔔 Offline Threshold: ${CONFIG.OFFLINE_THRESHOLD} failed pings`);
@@ -233,7 +285,7 @@ function startVpsMonitoring() {
     
     // Graceful shutdown for PM2
     process.on('SIGINT', () => {
-        console.log('\n🛑 Shutting down VPS monitor...');
+        console.log('\n🛑 Shutting down network monitor...');
         clearInterval(monitorInterval);
         clearInterval(clearLogsInterval);
         process.exit(0);
