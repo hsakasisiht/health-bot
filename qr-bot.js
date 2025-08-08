@@ -30,15 +30,7 @@ let startTime = new Date();
 
 // Logger (more silent to reduce console clutter)
 const logger = P({ 
-    level: 'fatal', // Only show fatal errors, hide session warnings
-    transport: {
-        target: 'pino-pretty',
-        options: {
-            colorize: false,
-            ignore: 'pid,hostname',
-            translateTime: 'SYS:standard'
-        }
-    }
+    level: 'fatal' // Only show fatal errors, hide session warnings
 });
 
 // Function to clear console and show summary
