@@ -1,0 +1,34 @@
+{
+  "name": "vps-monitor-bot",
+  "version": "1.0.0",
+  "description": "VPS monitoring bot with WhatsApp alerts using Baileys",
+  "main": "index.js",
+  "scripts": {
+    "start": "node qr-bot.js",
+    "dev": "nodemon qr-bot.js",
+    "pm2": "pm2 start ecosystem.config.js",
+    "pm2:stop": "pm2 stop vps-monitor",
+    "pm2:restart": "pm2 restart vps-monitor",
+    "pm2:logs": "pm2 logs vps-monitor",
+    "pm2:delete": "pm2 delete vps-monitor"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.18",
+    "ping": "^0.4.4",
+    "pino": "^8.19.0",
+    "qrcode-terminal": "^0.12.0",
+    "pm2": "^5.3.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.3"
+  },
+  "keywords": [
+    "vps",
+    "monitoring",
+    "whatsapp",
+    "baileys",
+    "bot"
+  ],
+  "author": "",
+  "license": "MIT"
+}
