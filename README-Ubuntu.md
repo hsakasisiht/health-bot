@@ -68,7 +68,18 @@ This ensures:
 ## 🐛 Troubleshooting
 
 ### "Decrypted message with closed session" warnings
-These are normal WhatsApp session management messages. The bot reduces them but they may still appear occasionally.
+These are normal WhatsApp session management messages. To minimize console clutter:
+
+```bash
+# Use clean start to filter session warnings
+npm run start:clean
+
+# Or use the shell script
+chmod +x start-clean.sh
+./start-clean.sh
+```
+
+The warnings don't affect functionality - they're just verbose protocol logs.
 
 ### Network ping failures
 The bot now pings external DNS servers (8.8.8.8) instead of self-pinging, preventing VPS internal network issues.
